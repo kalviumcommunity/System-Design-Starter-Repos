@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "LU 2.4 Assignment: Fix the broken Helpdesk PostgreSQL schema to match the ER diagram",
   "scripts": {
-    "db:reset": "psql -c 'DROP DATABASE IF EXISTS helpdesk_test;' && psql -c 'CREATE DATABASE helpdesk_test;' && psql -d helpdesk_test -f migrations/001_initial_schema.sql",
-    "test": "pg_prove -d helpdesk_test tests/schema.test.sql"
+    "db:reset": "psql -d postgres -c \"DROP DATABASE IF EXISTS helpdesk_test;\" && psql -d postgres -c \"CREATE DATABASE helpdesk_test;\" && psql -d helpdesk_test -f migrations/001_initial_schema.sql",
+    "test": "psql -d helpdesk_test -c \"CREATE EXTENSION IF NOT EXISTS pgtap;\" && pg_prove -d helpdesk_test tests/schema.test.sql"
   },
   "devDependencies": {}
 }
