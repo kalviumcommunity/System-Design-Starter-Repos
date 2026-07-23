@@ -1,5 +1,29 @@
 # Helpdesk Schema Repair — LU 2.4 Assignment
 
+## ERD-to-Schema Decisions
+
+### Decision 1: UUID primary and foreign keys
+ERD said: Every entity identifier and relationship key is a `uuid`.
+Schema decided: All primary keys and foreign keys use `UUID`, with primary keys defaulting to `gen_random_uuid()`.
+Reason: UUIDs preserve the ERD's identifier contract and avoid exposing predictable sequence values across organizations.
+
+### Decision 2: Ticket assignee delete action
+ERD said: A ticket may have a nullable `assignee_id` relationship to an agent.
+Schema decided: `tickets.assignee_id` references `agents(id)` with `ON DELETE SET NULL`.
+Reason: Removing an agent must leave the ticket intact while accurately making it unassigned.
+
+### Decision 3: Creation timestamp default
+ERD said: Each entity has a creation timestamp.
+Schema decided: Every `created_at` column is `TIMESTAMPTZ NOT NULL DEFAULT NOW()`.
+Reason: Creation times are always captured and retain timezone-aware production timestamps.
+
+## Rejected Table Shape
+
+### Shape: `tickets.tags` array
+What it was: A `TEXT[]` column stored all ticket tags directly on the `tickets` table.
+Why rejected: Tags are organization-owned entities and ticket tagging is a many-to-many relationship with its own `added_by` and `added_at` data.
+What would break: The array cannot enforce tag ownership or foreign keys, cannot record who applied a tag, and makes tag reuse and deletion inconsistent.
+
 ## What This Is
 
 You are a backend engineer on the Helpdesk team. A colleague wrote the first draft of the PostgreSQL schema in `migrations/001_initial_schema.sql`. It has **intentional errors** — wrong column types, missing constraints, wrong ON DELETE behaviour, and a rejected table shape that should have never been there.
