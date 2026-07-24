@@ -97,15 +97,14 @@ The first run **fails most tests** — the schema is broken. Fix it until all 20
 
 ---
 
-## The File to Fix
+## Files to Update
 
-**Only edit this file:**
+Repair the migration and document the retrieval-model decisions in this README:
 
 ```
 migrations/001_retrieval_schema.sql
+README.md
 ```
-
-Every broken line has a `-- wrong:` or `-- MISSING:` comment. Read each one.
 
 ---
 
@@ -190,33 +189,52 @@ git add migrations/001_retrieval_schema.sql README.md
 git commit -m "fix: repair the incident retrieval schema to match the spec"
 ```
 
-2. Update this `README.md` with exactly **3 retrieval-model decisions** and **1 rejected shape**:
+2. Review the documented retrieval-model decisions below.
 
-```markdown
 ## Retrieval-Model Decisions
 
-### Decision 1: [Embedding storage decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+### Decision 1: Store one native vector per incident chunk
+Spec said: Incident descriptions are split into chunks, and each chunk is
+embedded into a 1,536-dimension vector.
 
-### Decision 2: [ON DELETE decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+Schema decided: `incident_chunks.embedding` is `vector(1536) NOT NULL`, with an
+HNSW index using `vector_cosine_ops`.
 
-### Decision 3: [Filter-metadata / denormalisation decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
+Reason: The native pgvector type supports cosine-distance search and an ANN
+index, while per-chunk vectors preserve useful retrieval granularity.
+
+### Decision 2: Cascade derived chunks with their incident
+Spec said: Incident chunks are derived from authoritative incident records and
+have no meaning without their source incident.
+
+Schema decided: `incident_chunks.incident_id` is a required `BIGINT` foreign key
+with explicit `ON DELETE CASCADE`.
+
+Reason: Deleting an incident automatically removes stale retrieval data and
+keeps the authoritative and derived stores consistent.
+
+### Decision 3: Denormalize metadata needed by hybrid retrieval
+Spec said: Similarity search must support relational filters for team and
+severity.
+
+Schema decided: Every chunk stores required `team_id BIGINT` and `severity TEXT`
+copies from its incident.
+
+Reason: Keeping filter metadata beside each vector lets PostgreSQL filter ANN
+candidates during retrieval without joining back to `incidents` for every
+search.
 
 ## Rejected Shape
 
-### Shape: [name what you removed or rejected]
-What it was: ...
-Why rejected: ...
-What would break: ...
-```
+### Shape: A single `incidents.embedding` column
+What it was: One `TEXT` embedding column added directly to each incident.
+
+Why rejected: A long, multi-paragraph description contains several distinct
+ideas and must produce multiple independently retrievable chunks.
+
+What would break: Forcing the entire description into one vector removes
+chunk-level retrieval granularity, so a relevant paragraph can be diluted by
+unrelated text and cannot be returned with its precise source passage.
 
 3. Push and open a PR:
 ```bash
@@ -244,7 +262,7 @@ git push origin retrieval-schema-repair
 ```
 incident-retrieval-repair/
 ├── migrations/
-│   └── 001_retrieval_schema.sql   ← the broken schema — only file you edit
+│   └── 001_retrieval_schema.sql   ← repaired retrieval schema
 ├── tests/
 │   └── schema.test.sql            ← 20 pgTAP tests — do not edit
 ├── README.md                      ← this file — update with your decisions
