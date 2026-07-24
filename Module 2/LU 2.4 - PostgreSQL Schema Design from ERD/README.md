@@ -106,15 +106,14 @@ The 36 pgTAP tests verify:
 
 ---
 
-## The File to Fix
+## Files to Update
 
-**Only edit this file:**
+Repair the migration and document the decisions in this README:
 
 ```
 migrations/001_initial_schema.sql
+README.md
 ```
-
-Every broken line has a `-- wrong:` comment explaining what the problem is. Read each comment carefully.
 
 ---
 
@@ -204,33 +203,54 @@ git add migrations/001_initial_schema.sql README.md
 git commit -m "fix: repair helpdesk schema to match ERD"
 ```
 
-2. Update `README.md` (this file) with exactly **3 ERD-to-schema decisions** and **1 rejected table shape** using this format:
+2. Review the documented design decisions below.
 
-```markdown
 ## ERD-to-Schema Decisions
 
-### Decision 1: [Column type decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
+### Decision 1: Use PostgreSQL UUID and timezone-aware timestamp types
+ERD said: Primary and foreign-key identifiers are `uuid`, and date-time
+attributes are `timestamp`.
 
-### Decision 2: [ON DELETE decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
+Schema decided: Every identifier is `UUID`; primary keys default to
+`gen_random_uuid()`, and every date-time attribute is `TIMESTAMPTZ`.
 
-### Decision 3: [Default value decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
+Reason: Matching UUID types keeps foreign keys compatible, while timezone-aware
+timestamps preserve the actual instant across regions.
+
+### Decision 2: Preserve ownership and audit semantics on deletion
+ERD said: Organizations own agents, tickets, and tags; agents create tickets,
+comments, and tag associations; tickets own comments and tag associations.
+
+Schema decided: Tags cascade with organizations; comments and ticket-tag
+associations cascade with their parent records; audit references and
+organization references on agents and tickets use `ON DELETE RESTRICT`; and
+ticket assignees use `ON DELETE SET NULL`.
+
+Reason: Dependent data is cleaned up with its owner, historical attribution
+cannot be silently lost, and tickets remain usable if an assignee is removed.
+
+### Decision 3: Default generated and creation-time values
+ERD said: Each entity has an ID, each creation event has a timestamp, ticket
+status has a fixed lifecycle, and comment visibility is boolean.
+
+Schema decided: UUID primary keys default to `gen_random_uuid()`, creation
+timestamps default to `NOW()`, ticket status defaults to `open`, and comment
+`internal` defaults to `FALSE`.
+
+Reason: Database defaults make inserts consistent across clients while CHECK
+constraints and proper types still enforce the ERD's valid states.
 
 ## Rejected Table Shape
 
-### Shape: [name what you removed or rejected]
-What it was: ...
-Why rejected: ...
-What would break: ...
-```
+### Shape: Ticket tags stored as a `TEXT[]` column
+What it was: A `tags TEXT[]` column added directly to `tickets`.
+
+Why rejected: The ERD models tags as organization-owned entities connected to
+tickets through the `ticket_tags` association.
+
+What would break: An array cannot enforce tag foreign keys, record who added a
+tag or when it was added, safely cascade deletions, or reuse one tag across
+multiple tickets.
 
 3. Push and open a PR:
 ```bash
@@ -257,7 +277,7 @@ git push origin schema-repair
 ```
 helpdesk-schema-repair/
 ├── migrations/
-│   └── 001_initial_schema.sql   ← the broken schema — only file you edit
+│   └── 001_initial_schema.sql   ← repaired schema
 ├── tests/
 │   └── schema.test.sql          ← 36 pgTAP tests — do not edit
 ├── README.md                    ← this file — update with your decisions
