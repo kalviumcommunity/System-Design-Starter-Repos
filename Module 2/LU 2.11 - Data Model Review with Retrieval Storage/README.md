@@ -159,6 +159,43 @@ npm test
 
 ---
 
+## Retrieval-Model Decisions
+
+### Decision 1: Embedding Storage as Native Vector Type
+**Spec said:** Store embeddings in a way optimized for vector similarity search (the core operation for retrieval).
+
+**Schema decided:** `embedding vector(1536) NOT NULL` — a native PostgreSQL vector column.
+
+**Reason:** Native vector types enable cosine-distance similarity queries (`<=>` operator) and efficient HNSW ANN indexing. Storing embeddings as `TEXT` or `JSON` strings prevents efficient neighbor searches and cannot be indexed for retrieval. The platform needs sub-millisecond latency for "show three similar incidents" — that requires native vector support with HNSW indexing.
+
+### Decision 2: ON DELETE CASCADE for Incident-Chunk Foreign Key
+**Spec said:** Chunks have no standalone meaning; they exist only to support retrieval of their parent incident.
+
+**Schema decided:** `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE`.
+
+**Reason:** A chunk is a decomposition of an incident — if the incident is deleted or resolved, all its chunks become orphaned and useless. Cascading deletion automatically maintains referential integrity. Without `ON DELETE CASCADE`, resolving or archiving an incident leaves dangling chunks in the retrieval index, polluting search results.
+
+### Decision 3: Denormalised Filter Metadata (team_id, severity)
+**Spec said:** Hybrid retrieval filters by team and severity *alongside* vector similarity ranking.
+
+**Schema decided:** `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` denormalised into `incident_chunks`.
+
+**Reason:** Retrieval queries must filter by team (multi-tenant isolation) and severity (prioritize critical incidents) before ranking by similarity. If team and severity live only on `incidents`, every retrieval query must JOIN the chunks to the parent table, slowing down an already expensive vector search. Denormalisation trades a small storage overhead for dramatically faster access patterns — a core data-modelling principle for retrieval storage (LU16).
+
+## Rejected Shape
+
+### Shape: Single embedding column on `incidents`
+**What it was:** `ALTER TABLE incidents ADD COLUMN embedding TEXT;` — one embedding vector per incident.
+
+**Why rejected:** An incident is typically a multi-paragraph report: title, description, environment context, steps to reproduce, resolution notes. One vector cannot represent all of that. Vector embeddings compress information into a fixed-dimension space — a single embedding of a 5,000-token incident report loses crucial signal about specific failure modes, team involvement, and temporal context.
+
+**What would break:** 
+- **Chunking isolation lost:** The retrieval system cannot surface which *part* of an incident is relevant to the new case (e.g., "this failed because of database index saturation, not network"). A query about indexing issues would return the whole incident, even though the user only cares about the database section.
+- **Granular filtering fails:** Filtering by severity or team on a single embedding per incident creates false positives. An incident marked "P1" might contain mostly a "P3" issue in one chunk — you cannot downrank that chunk alone if all chunks share one vector.
+- **Retrieval recall suffers:** Similar incidents are ranked by one dense vector. Multi-chunk embedding allows the system to match on any relevant section, increasing recall. One embedding per incident forces an all-or-nothing ranking.
+
+---
+
 ## Common Errors
 
 **`ERROR: type "vector" does not exist`**
