@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticate } = require('./middleware/auth');
+const { accessLogger } = require('./middleware/accessLogger');
 const reportHandler = require('./handlers/getReport');
 const { v4: uuidv4 } = require('uuid');
 
@@ -25,7 +26,7 @@ app.use(express.json());
 
 // Route for GET /reports/:id
 // Entry point: uses middleware, then handler
-app.get('/reports/:id', authenticate, reportHandler);
+app.get('/reports/:id', authenticate, accessLogger, reportHandler);
 
 // Simple health check
 app.get('/health', (req, res) => {
