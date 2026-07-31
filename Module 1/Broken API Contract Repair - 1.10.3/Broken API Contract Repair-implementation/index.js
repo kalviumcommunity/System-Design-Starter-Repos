@@ -17,7 +17,7 @@ const tasks = new Map([
   }]
 ]);
 
-app.get('/tasks/:id/complete', (req, res) => {
+app.patch('/tasks/:id/complete', (req, res) => {
   const taskId = parseInt(req.params.id, 10);
   const task = tasks.get(taskId);
 
@@ -28,16 +28,22 @@ app.get('/tasks/:id/complete', (req, res) => {
   task.status = 'completed';
   task.completed_at = new Date().toISOString();
 
+  // Versioning: '1.0' is deprecated. The response body is unchanged either
+  // way — we only add a Deprecation header so legacy clients get a signal
+  // to migrate, instead of silently keeping working forever on an old
+  // contract. '2.0' (or no header at all) is the clean, current default.
+  const apiVersion = req.headers['x-api-version'];
+  if (apiVersion === '1.0') {
+    res.set('Deprecation', 'true');
+  }
+
   res.status(200).json({
     id: task.id,
     task_ref: task.task_ref,
     title: task.title,
     assigned_user_id: task.assigned_user_id,
-    created_by_user_id_fk: task.created_by_user_id_fk,
-    internal_priority_score: task.internal_priority_score,
     project_id: task.project_id,
-    completed_at: task.completed_at,
-    internal_db_version: task.internal_db_version
+    completed_at: task.completed_at
   });
 });
 
