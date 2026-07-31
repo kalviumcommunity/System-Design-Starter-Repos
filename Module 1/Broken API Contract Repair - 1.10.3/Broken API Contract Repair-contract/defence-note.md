@@ -1,0 +1,3 @@
+1. Unsafe method: GET mutated state — crawlers/prefetchers could silently complete tasks — Fixed by: route changed to PATCH — Alternative rejected: POST, less precise than PATCH.
+2. Internal field leak: response exposed created_by_user_id_fk, internal_priority_score, internal_db_version — clients couple to DB schema — Fixed by: removed those fields from response/schema — Alternative rejected: docs-only hiding.
+3. No version path: no way to signal breaking changes — old clients break silently — Fixed by: X-API-Version header, Deprecation:true for '1.0' — Alternative rejected: separate /v1,/v2 routes.

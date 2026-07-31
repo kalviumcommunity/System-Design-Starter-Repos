@@ -1,17 +1,19 @@
 openapi: 3.0.0
 info:
   title: Helios Task Management API
-  version: 1.0.0
+  version: 2.0.0
   description: |
-    This is the BROKEN contract for the Helios task completion endpoint.
-    Your job is to find and fix all three design violations.
+    Repaired contract for the Helios task completion endpoint.
+    Fixes: unsafe HTTP method, leaked internal fields, missing version/deprecation path.
 
 paths:
   /tasks/{id}/complete:
-    get:
+    patch:
       summary: Complete a task
       description: |
-        Marks a task as completed. Uses GET because we wanted a simple, stateless operation.
+        Marks a task as completed. Uses PATCH because this mutates existing
+        resource state (not safe, not cacheable) but is idempotent — repeating
+        the same completion request does not change the outcome.
       operationId: completeTask
       parameters:
         - name: id
@@ -20,9 +22,30 @@ paths:
           schema:
             type: integer
           description: The task ID to complete
+        - name: X-API-Version
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: ['1.0', '2.0']
+            default: '2.0'
+          description: |
+            Requested response version. '1.0' is deprecated: the response body
+            is unchanged, but a `Deprecation: true` header is returned so
+            legacy clients get a machine-readable migration signal instead of
+            silently continuing to rely on a version slated for removal.
+            Defaults to '2.0' when omitted.
       responses:
         '200':
           description: Task completed successfully
+          headers:
+            Deprecation:
+              description: >
+                Present and set to 'true' only when X-API-Version is '1.0'.
+                Absent for '2.0' or when the header is omitted.
+              required: false
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -30,37 +53,25 @@ paths:
                 properties:
                   id:
                     type: integer
-                    description: Internal task ID
+                    description: Public task ID
                   task_ref:
                     type: string
                   title:
                     type: string
                   assigned_user_id:
                     type: integer
-                  created_by_user_id_fk:
-                    type: integer
-                    description: Foreign key to user who created the task
-                  internal_priority_score:
-                    type: number
-                    description: Internal calculation used for prioritization
                   project_id:
                     type: integer
                   completed_at:
                     type: string
                     format: date-time
-                  internal_db_version:
-                    type: string
-                    description: Row version for optimistic locking
               example:
                 id: 42
                 task_ref: TSK-2024-001
                 title: Fix login form validation
                 assigned_user_id: 7
-                created_by_user_id_fk: 5
-                internal_priority_score: 87.3
                 project_id: 12
                 completed_at: '2024-05-19T14:32:00Z'
-                internal_db_version: 'v2.1.3'
         '400':
           description: Task ID is missing or invalid
         '404':
