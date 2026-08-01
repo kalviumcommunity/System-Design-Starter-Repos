@@ -17,7 +17,7 @@ const tasks = new Map([
   }]
 ]);
 
-app.get('/tasks/:id/complete', (req, res) => {
+app.patch('/tasks/:id/complete', (req, res) => {
   const taskId = parseInt(req.params.id, 10);
   const task = tasks.get(taskId);
 
@@ -28,16 +28,23 @@ app.get('/tasks/:id/complete', (req, res) => {
   task.status = 'completed';
   task.completed_at = new Date().toISOString();
 
+  // Versioning: legacy clients (X-API-Version: 1.0) still get the response,
+  // but are told via the Deprecation header that this version is going away.
+  const apiVersion = req.header('X-API-Version');
+  if (apiVersion === '1.0') {
+    res.set('Deprecation', 'true');
+  }
+
+  // Only public fields go out on the wire — internal DB/FK fields
+  // (created_by_user_id_fk, internal_priority_score, internal_db_version)
+  // are never included in the response.
   res.status(200).json({
     id: task.id,
     task_ref: task.task_ref,
     title: task.title,
     assigned_user_id: task.assigned_user_id,
-    created_by_user_id_fk: task.created_by_user_id_fk,
-    internal_priority_score: task.internal_priority_score,
     project_id: task.project_id,
-    completed_at: task.completed_at,
-    internal_db_version: task.internal_db_version
+    completed_at: task.completed_at
   });
 });
 
