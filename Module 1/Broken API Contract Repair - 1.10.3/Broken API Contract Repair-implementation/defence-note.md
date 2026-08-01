@@ -1,0 +1,3 @@
+1. HTTP method: GET used for a state-changing action — caches/pre-fetchers could trigger it accidentally — Fixed by: changed to PATCH — Alternative rejected: POST (loses idempotency).
+2. Data leakage: response exposed created_by_user_id_fk, internal_priority_score, internal_db_version — leaks DB internals to clients — Fixed by: stripped internal fields — Alternative rejected: client-side masking (still leaks on wire).
+3. No versioning: response shape had no migration path, breaking clients on change — Fixed by: X-API-Version header, Deprecation: true on legacy (1.0) — Alternative rejected: URL versioning (too heavy here).
