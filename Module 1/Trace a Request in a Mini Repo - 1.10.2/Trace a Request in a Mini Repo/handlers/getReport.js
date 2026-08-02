@@ -1,8 +1,6 @@
-const notifier = require('../services/notifier');
-
 // Handler for GET /reports/:id
-// This handler does TWO things: fetches report AND sends notification
-// This is the DESIGN DRIFT issue students need to identify
+// Fetches the report, checks ownership, and returns the response.
+// Access logging is handled by middleware/accessLogger.js, not here.
 
 async function getReport(req, res) {
   const reportId = parseInt(req.params.id, 10);
@@ -28,23 +26,6 @@ async function getReport(req, res) {
         message: 'You do not have access to this report'
       }
     });
-  }
-
-  // DESIGN DRIFT: Handler also sends a notification
-  // This behavior was NEVER mentioned in the sequence diagram from LU 1.5
-  // The diagram only showed: fetch report → respond
-  // But here we're also calling notifier.sendAccessLog
-  // This violates single-responsibility design
-
-  try {
-    await notifier.sendAccessLog({
-      user_id: userId,
-      report_id: reportId,
-      timestamp: new Date().toISOString(),
-      action: 'accessed'
-    });
-  } catch (err) {
-    console.error('Notification failed:', err.message);
   }
 
   // Step 3: Return the report
