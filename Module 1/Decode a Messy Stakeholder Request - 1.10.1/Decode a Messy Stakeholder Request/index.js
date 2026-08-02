@@ -49,22 +49,4 @@ app.post('/alerts/webhook', (req, res) => {
   res.json({ received: true, truck_id, breach_type, logged_at: new Date().toISOString() });
 });
 
-// Additional routes the developer added based on the PM's message
-
-app.get('/chat', (req, res) => {
-  res.json({ messages: [] });
-});
-
-app.get('/fuel/costs', (req, res) => {
-  res.json({ costs: [{ truck_id: 'T-001', cost_usd: 120.50 }] });
-});
-
-app.get('/offline/sync', (req, res) => {
-  res.json({ sync_token: 'abc123', data: {} });
-});
-
-app.get('/theme', (req, res) => {
-  res.json({ mode: 'light' });
-});
-
 module.exports = app;
