@@ -8,6 +8,8 @@
 --          The vector(n) type and the HNSW index come from the pgvector
 --          extension. Without it, vector(1536) does not exist.
 
+CREATE EXTENSION IF NOT EXISTS vector;
+
 CREATE TABLE incidents (
   id          BIGSERIAL PRIMARY KEY,
   title       TEXT NOT NULL,
@@ -25,6 +27,8 @@ CREATE TABLE incident_chunks (
   embedding   TEXT,                               -- wrong: should be vector(1536) NOT NULL, not TEXT
   -- MISSING: team_id   BIGINT NOT NULL   (denormalised filter metadata)
   -- MISSING: severity  TEXT   NOT NULL   (denormalised filter metadata)
+  team_id   BIGINT NOT NULL,
+  severity  TEXT   NOT NULL,
   created_at  TIMESTAMP DEFAULT now()             -- wrong: should be TIMESTAMPTZ NOT NULL
 );
 
@@ -32,12 +36,17 @@ CREATE TABLE incident_chunks (
 -- An incident's long, multi-paragraph description must be split into several
 -- chunks, each with its own vector. One embedding per incident is the wrong
 -- model. Remove this line; embeddings live per-chunk in incident_chunks.
-ALTER TABLE incidents ADD COLUMN embedding TEXT;  -- wrong: remove entirely
+-- ALTER TABLE incidents ADD COLUMN embedding TEXT;  -- wrong: remove entirely
 
 -- MISSING: ANN index on incident_chunks.embedding
 --          CREATE INDEX idx_incident_chunks_embedding
 --            ON incident_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_incident_chunks_embedding
+ON incident_chunks USING hnsw (embedding vector_cosine_ops);
 
 -- MISSING: B-tree index on incident_chunks.incident_id
 --          CREATE INDEX idx_incident_chunks_incident_id
 --            ON incident_chunks (incident_id);
+
+CREATE INDEX idx_incident_chunks_incident_id
+ON incident_chunks (incident_id);
