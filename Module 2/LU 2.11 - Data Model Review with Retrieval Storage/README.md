@@ -250,3 +250,40 @@ incident-retrieval-repair/
 ├── README.md                      ← this file — update with your decisions
 └── package.json                   ← npm scripts — do not edit
 ```
+
+
+## Retrieval-Model Decisions
+
+### Decision 1: Native vector embedding storage
+
+Spec said: Each incident chunk must store a 1,536-dimension embedding using the pgvector type.
+
+Schema decided: The `incident_chunks.embedding` column uses `vector(1536) NOT NULL`.
+
+Reason: Native pgvector storage allows embeddings to be compared using vector similarity operators and supports the required HNSW ANN index. Storing embeddings as TEXT would prevent efficient vector similarity search and indexing.
+
+### Decision 2: Cascade deletion for incident chunks
+
+Spec said: `incident_chunks.incident_id` must reference `incidents(id)` with `ON DELETE CASCADE`.
+
+Schema decided: `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE`.
+
+Reason: Incident chunks are derived data and have no meaning without their authoritative incident. When an incident is deleted, its associated chunks should automatically be removed to prevent orphaned retrieval data.
+
+### Decision 3: Denormalised filter metadata
+
+Spec said: `incident_chunks` must contain `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` as filter metadata.
+
+Schema decided: The team and severity values are stored directly in each incident chunk.
+
+Reason: Retrieval needs to filter chunks by team and severity while performing vector similarity search. Keeping this metadata in the retrieval table avoids requiring an additional join during the retrieval query and supports the hybrid retrieval access pattern.
+
+## Rejected Shape
+
+### Shape: Single embedding column on `incidents`
+
+What it was: The original schema added an `embedding TEXT` column directly to the authoritative `incidents` table.
+
+Why rejected: An incident description can be long and contain multiple distinct pieces of information. One embedding cannot provide the required chunk-level retrieval granularity. The correct model is one incident with many chunks, where each chunk has its own vector.
+
+What would break: Chunking and retrieval granularity would be lost. The system could not independently retrieve the most relevant portions of a long incident description, reducing the quality of similarity search and grounded AI summaries.
