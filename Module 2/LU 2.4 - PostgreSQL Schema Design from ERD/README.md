@@ -263,3 +263,27 @@ helpdesk-schema-repair/
 ├── README.md                    ← this file — update with your decisions
 └── package.json                 ← npm scripts — do not edit
 ```
+
+## ERD-to-Schema Decisions
+
+### Decision 1: Column type and UUID choice
+ERD said: primary keys and foreign keys are `uuid`, and timestamps are `timestamp`.
+Schema decided: use `UUID PRIMARY KEY DEFAULT gen_random_uuid()` for all IDs, `UUID` for FK fields, and `TIMESTAMPTZ` for timestamp columns.
+Reason: Matches ERD semantics, prevents predictable sequential IDs, and ensures all event times are timezone-aware.
+
+### Decision 2: ON DELETE decision for ticket ownership
+ERD said: `created_by` is a required FK from `Ticket` to `Agent`.
+Schema decided: `created_by UUID NOT NULL REFERENCES agents(id) ON DELETE RESTRICT`.
+Reason: A ticket must retain a traceable creator for audit purposes; deleting the agent should not delete or orphan the ticket's creator information.
+
+### Decision 3: Default value decision for ticket status
+ERD said: `status` values include `open|pending|resolved|closed` and the ticket starts open.
+Schema decided: `status TEXT NOT NULL CHECK (status IN ('open','pending','resolved','closed')) DEFAULT 'open'`.
+Reason: Defaults are not expressed in the ERD, so the schema must enforce the initial ticket status at the database layer.
+
+## Rejected Table Shape
+
+### Shape: `tickets.tags` TEXT[] array column
+What it was: a rejected shape storing tags as an array on the `tickets` table.
+Why rejected: it violates normalization, loses referential integrity, and makes filtering tickets by tag difficult and error-prone.
+What would break: tag lookup, tag ownership by organization, and tag updates would become unreliable; the design would prevent proper tag-to-ticket many-to-many relationships.
