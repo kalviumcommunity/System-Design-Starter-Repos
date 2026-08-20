@@ -263,3 +263,39 @@ helpdesk-schema-repair/
 ├── README.md                    ← this file — update with your decisions
 └── package.json                 ← npm scripts — do not edit
 ```
+
+## ERD-to-Schema Decisions
+
+### Decision 1: UUID primary and foreign key types
+
+ERD said: All entity IDs and relationships use UUID identifiers.
+
+Schema decided: Every primary key uses `UUID PRIMARY KEY DEFAULT gen_random_uuid()` and every foreign key uses the `UUID` type.
+
+Reason: Using the same UUID type for primary and foreign keys ensures the schema matches the ERD and maintains type consistency across relationships.
+
+### Decision 2: ON DELETE behaviour for relationships
+
+ERD said: Some relationships are required for audit history, while others represent dependent data.
+
+Schema decided: Audit-related foreign keys such as `created_by`, `author_id`, and `added_by` use `ON DELETE RESTRICT`. The nullable `assignee_id` uses `ON DELETE SET NULL`. Dependent data such as comments and ticket-tag associations use `ON DELETE CASCADE`.
+
+Reason: Audit records should not lose information about who performed an action, unassigned tickets should remain when an assignee is deleted, and dependent records should be removed when their parent record no longer exists.
+
+### Decision 3: Timestamp default values
+
+ERD said: Entities contain timestamp fields such as `created_at` and `added_at`.
+
+Schema decided: Timestamp columns use `TIMESTAMPTZ`, with `created_at` and `added_at` defined using `DEFAULT NOW()`.
+
+Reason: `TIMESTAMPTZ` stores timezone-aware timestamps, and default values automatically record when a row is created.
+
+## Rejected Table Shape
+
+### Shape: `tags TEXT[]` on the tickets table
+
+What it was: The broken schema stored multiple tags directly in the `tickets` table as a `TEXT[]` array.
+
+Why rejected: Tags are separate entities belonging to an organization, and tickets have a many-to-many relationship with tags. The relationship also needs to record which agent added the tag and when.
+
+What would break: Using an array would prevent proper foreign key relationships to the `tags` table and would make it difficult to enforce referential integrity or store `added_by` and `added_at` for each tag assignment.
