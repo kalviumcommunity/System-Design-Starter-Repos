@@ -79,5 +79,36 @@ CREATE TABLE ticket_tags (
   added_by UUID NOT NULL
     REFERENCES agents(id)
     ON DELETE RESTRICT,
-  added_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticket_id, tag_id)
 );
+
+CREATE OR REPLACE FUNCTION check_ticket_tag_same_org()
+RETURNS TRIGGER AS $$
+DECLARE
+  ticket_org_id UUID;
+  tag_org_id UUID;
+BEGIN
+  SELECT org_id
+  INTO ticket_org_id
+  FROM tickets
+  WHERE id = NEW.ticket_id;
+
+  SELECT org_id
+  INTO tag_org_id
+  FROM tags
+  WHERE id = NEW.tag_id;
+
+  IF ticket_org_id <> tag_org_id THEN
+    RAISE EXCEPTION
+      'Ticket and tag must belong to the same organization';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER enforce_ticket_tag_same_org
+BEFORE INSERT OR UPDATE ON ticket_tags
+FOR EACH ROW
+EXECUTE FUNCTION check_ticket_tag_same_org();
