@@ -47,6 +47,10 @@ function buildContext() {
   return {
     // fill this in: title, currentSeverity, service, timeline...
     // but NOT reporterEmail or internalToken
+    title: incident.title,
+    currentSeverity: incident.currentSeverity,
+    service: incident.service,
+    timeline: timeline
   };
 }
 
@@ -56,6 +60,11 @@ function buildContext() {
 // AND there is a non-empty reason.
 // ============================================================
 function isValid(answer) {
+  for (let i = 0; i < SEVERITIES.length; i++) {
+    if (answer.suggestedSeverity === SEVERITIES[i]) {
+      return true;
+    }
+  }
   return false; // fill this in
 }
 
@@ -64,7 +73,7 @@ function isValid(answer) {
 // Return a short message so the workflow still makes sense.
 // ============================================================
 function fallback() {
-  return { status: 'MANUAL_REVIEW', message: '' /* fill this in */ };
+  return { status: 'MANUAL_REVIEW', message: 'AI suggestion is not available or invalid. Routing to manual review' /* fill this in */ };
 }
 
 // ── Given to you: runs one request start to finish. ──
