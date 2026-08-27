@@ -179,6 +179,34 @@ npm test
 
 ---
 
+## Retrieval-Model Decisions
+
+### Decision 1: Embedding storage as `vector(1536)` not `TEXT`
+Spec said: store the embedded incident text so it can be compared with cosine similarity for nearest-neighbour search.
+Schema decided: `embedding vector(1536) NOT NULL` using the pgvector extension.
+Reason: A native `vector` column enables the `<=>` cosine-distance operator and HNSW indexing. Storing embeddings as `TEXT` or `float8[]` makes vector similarity queries impossible and removes any chance of ANN index acceleration.
+
+### Decision 2: `ON DELETE CASCADE` on the foreign key
+Spec said: `incident_chunks.incident_id` must reference `incidents.id`.
+Schema decided: `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE`.
+Reason: A chunk has no meaning without its parent incident. Cascading the delete keeps the database consistent automatically — orphaned chunk rows would waste storage and pollute retrieval results with vectors that point to nothing.
+
+### Decision 3: Denormalised filter metadata (`team_id`, `severity`) on `incident_chunks`
+Spec said: hybrid retrieval must be able to filter by team and severity alongside the similarity ranking.
+Schema decided: copy `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` directly onto each chunk row.
+Reason: Filtering by joining back to `incidents` on every ANN query adds a join to an already expensive operation. Denormalising these two columns onto `incident_chunks` lets the database apply the predicate before or alongside the vector scan, keeping retrieval fast at scale (LU16 access-pattern-driven denormalisation).
+
+---
+
+## Rejected Shape
+
+### Shape: Single `embedding` column on `incidents`
+What it was: `ALTER TABLE incidents ADD COLUMN embedding TEXT;` — one embedding bolted directly onto the `incidents` table.
+Why rejected: A single vector cannot represent a long, multi-paragraph incident description. Embedding models have a fixed token limit; longer text must be split into overlapping chunks, each with its own vector. One embedding per incident loses the detail needed for accurate similarity search.
+What would break: Retrieval quality would degrade for any incident with more than ~300 words. The HNSW index would also be on `incidents` instead of `incident_chunks`, making per-chunk cosine search impossible and forcing a full-table scan fallback.
+
+---
+
 ## Submission
 
 Once all 20 tests pass:
@@ -188,34 +216,6 @@ Once all 20 tests pass:
 git checkout -b retrieval-schema-repair
 git add migrations/001_retrieval_schema.sql README.md
 git commit -m "fix: repair the incident retrieval schema to match the spec"
-```
-
-2. Update this `README.md` with exactly **3 retrieval-model decisions** and **1 rejected shape**:
-
-```markdown
-## Retrieval-Model Decisions
-
-### Decision 1: [Embedding storage decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
-
-### Decision 2: [ON DELETE decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
-
-### Decision 3: [Filter-metadata / denormalisation decision]
-Spec said: ...
-Schema decided: ...
-Reason: ...
-
-## Rejected Shape
-
-### Shape: [name what you removed or rejected]
-What it was: ...
-Why rejected: ...
-What would break: ...
 ```
 
 3. Push and open a PR:

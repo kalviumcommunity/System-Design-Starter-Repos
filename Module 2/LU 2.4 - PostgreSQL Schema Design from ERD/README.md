@@ -2,264 +2,58 @@
 
 ## What This Is
 
-You are a backend engineer on the Helpdesk team. A colleague wrote the first draft of the PostgreSQL schema in `migrations/001_initial_schema.sql`. It has **intentional errors** — wrong column types, missing constraints, wrong ON DELETE behaviour, and a rejected table shape that should have never been there.
+You are a backend engineer on the Helpdesk team. A colleague wrote the first draft of the PostgreSQL schema in `migrations/001_initial_schema.sql`. It had **intentional errors** — wrong column types, missing constraints, wrong ON DELETE behaviour, and a rejected table shape that should have never been there.
 
-Your job: **fix the schema so it correctly implements the ER diagram** from the assignment question. The ER diagram is the source of truth. The schema must match it exactly.
-
-When you're done, all 36 pgTAP tests must pass.
+The job was to **fix the schema so it correctly implements the ER diagram** from the assignment question. The ER diagram is the source of truth. The repaired schema matches it exactly, and all 36 pgTAP tests in `tests/schema.test.sql` pass.
 
 ---
 
-## Prerequisites
+## ERD-to-Schema Decisions
 
-Make sure you have the following installed before starting:
+### Decision 1: Column type decision (UUID PKs/FKs, TEXT over VARCHAR, TIMESTAMPTZ)
+ERD said: every entity has a `uuid id PK`, string attributes are marked `string`/`text`, and every timestamp attribute is marked `timestamp`.
+Schema decided: every primary key is `UUID PRIMARY KEY DEFAULT gen_random_uuid()` (via the `pgcrypto` extension), every FK column is `UUID` matching the type of the key it references, string attributes are `TEXT` (not `VARCHAR(n)`), and every timestamp column is `TIMESTAMPTZ` (not `TIMESTAMP`).
+Reason: `SERIAL`/`INTEGER` keys leak information (row counts, ordering) and don't merge safely across services or regions — UUIDs generated at insert time avoid both problems. Postgres `TEXT` has no performance penalty versus `VARCHAR(n)` and the ERD never specified a length cap, so adding one would be an invented constraint not in the source of truth. `TIMESTAMPTZ` stores an absolute instant with timezone context; plain `TIMESTAMP` silently assumes "whatever timezone the server/session happens to be in," which causes real bugs the moment agents or organizations span more than one timezone.
 
-| Tool | Why | Check |
-|------|-----|-------|
-| PostgreSQL (v13+) | Runs the test database | `psql --version` |
-| pgTAP | Test framework for schema validation | `pg_prove --version` |
-| pg_prove | pgTAP test runner | comes with pgTAP |
-| Node.js + npm | Runs the helper scripts | `node --version` |
+### Decision 2: ON DELETE decision (RESTRICT for audit trails, CASCADE for dependents, SET NULL for optional links)
+ERD said: the diagram only expresses *that* a relationship exists (e.g. `Agent ||--o{ Ticket : "created_by"`), not *what happens on delete* — that behaviour has to be inferred from the meaning of each relationship.
+Schema decided: `agents.org_id`, `tickets.org_id`, `tickets.created_by`, and `comments.author_id` all use `ON DELETE RESTRICT`. `tickets.assignee_id` uses `ON DELETE SET NULL`. `comments.ticket_id`, `tags.org_id`, `ticket_tags.ticket_id`, and `ticket_tags.tag_id` all use `ON DELETE CASCADE`. `ticket_tags.added_by` uses `ON DELETE RESTRICT`.
+Reason: Each choice follows from whether the child row's existence still makes sense — or whether losing the link would destroy an audit trail — once the parent is gone. `created_by`/`author_id`/`added_by` are audit records (who did this); silently deleting them by cascading, or silently nulling them, would erase accountability, so a delete on the parent agent is *rejected* (RESTRICT) until the historical rows are dealt with explicitly. A comment or a tag-association has no independent meaning without its ticket, so those cascade. `assignee_id` is different: an unassigned ticket is still a perfectly valid ticket, so deleting the assigned agent should just detach the assignment (SET NULL) rather than block the delete or destroy the ticket.
 
-### Installing pgTAP
-
-**macOS (Homebrew):**
-```bash
-brew install pgtap
-```
-
-**Ubuntu / Debian:**
-```bash
-sudo apt-get install postgresql-15-pgtap
-# replace 15 with your postgres version
-```
-
-**Windows (via pgxn):**
-```bash
-pgxn install pgtap
-```
-
-After installing, enable it in your database:
-```sql
-CREATE EXTENSION IF NOT EXISTS pgtap;
-```
+### Decision 3: Default value decision (`created_at DEFAULT NOW()` vs. nullable timestamps with no default)
+ERD said: `created_at` appears on every entity with no "nullable" annotation, while `resolved_at` (Ticket) and `deactivated_at` (Agent) are explicitly marked `"nullable"`.
+Schema decided: every `created_at` column is `TIMESTAMPTZ NOT NULL DEFAULT NOW()`, while `resolved_at` and `deactivated_at` are plain nullable `TIMESTAMPTZ` columns with no default and no NOT NULL.
+Reason: `created_at` records a fact that is always true the instant a row is inserted — it should never require the application to remember to set it, and it should never be missing, so `NOT NULL DEFAULT NOW()` is both correct and removes a whole class of "forgot to set created_at" bugs. `resolved_at`/`deactivated_at` represent events that may never happen (a ticket that's still open, an agent who's still active) — giving them a default would fabricate a false timestamp, so they stay nullable with no default, and the application sets them explicitly the moment the real event occurs.
 
 ---
 
-## Setup
+## Rejected Table Shape
 
-### Step 1: Clone or fork the repo
-
-```bash
-git clone <repo-url>
-cd helpdesk-schema-repair
-```
-
-### Step 2: Make sure PostgreSQL is running
-
-```bash
-# macOS (Homebrew)
-brew services start postgresql
-
-# Ubuntu
-sudo service postgresql start
-
-# Docker (if you prefer)
-docker run --name helpdesk-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:15
-```
-
-### Step 3: Create the test database and apply the schema
-
-```bash
-npm run db:reset
-```
-
-This command does three things in sequence:
-1. Drops the `helpdesk_test` database if it exists
-2. Creates a fresh `helpdesk_test` database
-3. Applies `migrations/001_initial_schema.sql` to it
-
-> ⚠️ If you see a "role does not exist" error, your PostgreSQL user might need to be set. Run `psql -U postgres` first and make sure you can connect. Then update the `db:reset` script in `package.json` to add `-U postgres` to each psql command.
-
-### Step 4: Run the tests
-
-```bash
-npm test
-```
-
-The first time you run this, **most tests will fail**. That's expected — the schema is broken. Your job is to fix it until all 36 pass.
+### Shape: `tickets.tags TEXT[]` (tags stored as a raw array column on tickets)
+What it was: the broken starter schema had `ALTER TABLE tickets ADD COLUMN tags TEXT[];` — storing a ticket's tags as a plain array of strings directly on the ticket row, instead of the `Tag` and `TicketTag` entities shown in the ERD.
+Why rejected: the ERD models tags as their own first-class entity (`Tag`, with `org_id`, `name`, `color_hex`) connected to tickets through a many-to-many join table (`TicketTag`, which also records `added_by`/`added_at`). A bare array column throws all of that away — it can't enforce that a tag belongs to the right organization, it can't record who applied a tag or when, and it can't guarantee the tag name is spelled consistently (e.g. `"billing"` vs `"Billing"` vs `"BILLING"` living side-by-side across tickets with no shared source of truth).
+What would break: querying "every ticket with the tag `billing`" would require scanning and unnesting the array on every ticket row instead of a simple indexed join; renaming a tag org-wide (e.g. fixing a typo) would require updating the array on every ticket instead of one row in `tags`; there would be no way to know which agent added a given tag or when (`added_by`/`added_at` from the ERD simply have nowhere to live); and nothing would stop one organization's tickets from referencing another organization's tag name, since a raw string has no foreign key to enforce that boundary. The two-table `tags` + `ticket_tags` design replaces all of this with a normal, indexable, auditable many-to-many relationship.
 
 ---
 
-## What the Tests Check
-
-The 36 pgTAP tests verify:
-
-| Category | Tests | What they check |
-|----------|-------|-----------------|
-| Table existence | 6 | All 6 tables exist (including the 2 you need to add) |
-| Column types | 16 | UUIDs are UUID not INTEGER, timestamps are TIMESTAMPTZ not TIMESTAMP, booleans are BOOLEAN not TEXT |
-| NOT NULL | 11 | Required fields are actually marked NOT NULL |
-| Nullable | 3 | Optional fields are correctly nullable |
-| Column absence | 1 | The rejected `tags TEXT[]` column is gone |
-| UNIQUE | 1 | `agents.email` is UNIQUE |
-
----
-
-## The File to Fix
-
-**Only edit this file:**
-
-```
-migrations/001_initial_schema.sql
-```
-
-Every broken line has a `-- wrong:` comment explaining what the problem is. Read each comment carefully.
-
----
-
-## Hints
-
-Work table by table. Don't try to fix everything at once.
-
-**Hint 1 — Types:**
-The ERD uses conceptual types. Translate them:
-- `uuid` → `UUID`
-- `string` → `TEXT` (not VARCHAR)
-- `text` → `TEXT`
-- `boolean` → `BOOLEAN` (not TEXT)
-- `timestamp` → `TIMESTAMPTZ` (not TIMESTAMP — timezone matters in production)
-
-**Hint 2 — Primary Keys:**
-Every `SERIAL PRIMARY KEY` should be `UUID PRIMARY KEY DEFAULT gen_random_uuid()`. Check if you need to enable the `pgcrypto` extension first.
-
-**Hint 3 — NOT NULL:**
-If the ERD shows a field without `"nullable"` in quotes, it is required. Add `NOT NULL`. Go through every field in every entity in the ERD.
-
-**Hint 4 — CHECK constraints:**
-If the ERD attribute note shows pipe-separated values like `"starter|pro|enterprise"`, that means a CHECK constraint with exactly those allowed values. Do not use an ENUM type — use `TEXT NOT NULL CHECK (column IN (...))`.
-
-**Hint 5 — Foreign Keys:**
-All FK columns in the broken schema are `INTEGER`. They should all be `UUID`. Also: every FK needs an explicit `ON DELETE` clause. Look at the assignment question for the correct ON DELETE behaviour per FK (the table is provided there).
-
-**Hint 6 — The Rejected Shape:**
-There's an `ALTER TABLE` at the bottom of the broken schema adding `tags TEXT[]` to tickets. This is the wrong design. Remove that line entirely. Then add two new tables: `tags` and `ticket_tags`. Their columns are in the ER diagram.
-
-**Hint 7 — Timestamps:**
-All `created_at` columns should have `NOT NULL DEFAULT NOW()`. All nullable timestamp columns (`resolved_at`, `deactivated_at`) should have no DEFAULT and no NOT NULL.
-
----
-
-## Workflow
-
-The recommended loop while fixing:
+## How the Schema Was Verified
 
 ```bash
-# 1. Edit the schema
-nano migrations/001_initial_schema.sql   # or use your editor
-
-# 2. Reset the database (re-applies the schema from scratch)
-npm run db:reset
-
-# 3. Run the tests and see how many pass
-npm test
-
-# 4. Repeat until all 36 pass
+npm run db:reset   # drops/recreates helpdesk_test and applies migrations/001_initial_schema.sql
+npm test           # runs the 36 pgTAP assertions in tests/schema.test.sql
 ```
 
-Each time you run `db:reset`, the database is wiped and recreated from your current schema file. This means each run is a clean slate — no leftover state.
-
----
-
-## Common Errors
-
-**`ERROR: type "uuid" does not exist`**
-→ Add `CREATE EXTENSION IF NOT EXISTS "pgcrypto";` at the top of your SQL file.
-
-**`ERROR: function gen_random_uuid() does not exist`**
-→ Same fix — pgcrypto extension is not enabled.
-
-**`ERROR: column "tags" of relation "tickets" does not exist` (when running tests)**
-→ You still have the `ALTER TABLE tickets ADD COLUMN tags TEXT[]` line. Remove it.
-
-**`ERROR: there is no unique constraint matching given keys for referenced table`**
-→ A FK references a column that is not a primary key or unique. Check your FK definitions.
-
-**`pg_prove: command not found`**
-→ pgTAP is not installed or not on your PATH. See prerequisites above.
-
-**`psql: error: connection to server failed`**
-→ PostgreSQL is not running. Start it with `brew services start postgresql` (macOS) or `sudo service postgresql start` (Linux).
+All 36 assertions pass against the repaired `migrations/001_initial_schema.sql`.
 
 ---
 
 ## Submission
 
-Once all 36 tests pass:
+Branch: `schema-repair`
 
-1. Commit your changes to a branch called `schema-repair`:
 ```bash
 git checkout -b schema-repair
 git add migrations/001_initial_schema.sql README.md
 git commit -m "fix: repair helpdesk schema to match ERD"
-```
-
-2. Update `README.md` (this file) with exactly **3 ERD-to-schema decisions** and **1 rejected table shape** using this format:
-
-```markdown
-## ERD-to-Schema Decisions
-
-### Decision 1: [Column type decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
-
-### Decision 2: [ON DELETE decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
-
-### Decision 3: [Default value decision]
-ERD said: ...
-Schema decided: ...
-Reason: ...
-
-## Rejected Table Shape
-
-### Shape: [name what you removed or rejected]
-What it was: ...
-Why rejected: ...
-What would break: ...
-```
-
-3. Push and open a PR:
-```bash
 git push origin schema-repair
-```
-
-4. In the PR description, paste your `npm test` output showing all 36 tests passing.
-
----
-
-## What You May Not Do
-
-- Change the ER diagram (it is the source of truth)
-- Add columns that don't exist in the ER diagram
-- Skip `ON DELETE` on any FK — every FK must have an explicit `ON DELETE` clause
-- Use `SERIAL` or `INTEGER` for any PK or FK column
-- Leave the `tags TEXT[]` array column on the tickets table
-- Use ENUM type instead of TEXT + CHECK
-
----
-
-## Project Structure
-
-```
-helpdesk-schema-repair/
-├── migrations/
-│   └── 001_initial_schema.sql   ← the broken schema — only file you edit
-├── tests/
-│   └── schema.test.sql          ← 36 pgTAP tests — do not edit
-├── README.md                    ← this file — update with your decisions
-└── package.json                 ← npm scripts — do not edit
 ```
