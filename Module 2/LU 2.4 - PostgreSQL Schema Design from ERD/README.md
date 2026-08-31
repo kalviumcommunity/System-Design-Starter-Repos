@@ -193,6 +193,32 @@ Each time you run `db:reset`, the database is wiped and recreated from your curr
 
 ---
 
+## ERD-to-Schema Decisions
+
+### Decision 1: Column type — TIMESTAMPTZ instead of TIMESTAMP
+ERD said: `created_at` is a timestamp on Organization, Agent, Ticket, Comment, and TicketTag.
+Schema decided: `TIMESTAMPTZ NOT NULL DEFAULT NOW()` for every `created_at` / `added_at` column.
+Reason: The ERD does not specify timezone handling. `TIMESTAMP` stores values without timezone context, which becomes ambiguous when agents in different regions create tickets. `TIMESTAMPTZ` stores UTC and converts on read, so support activity is unambiguous in production.
+
+### Decision 2: ON DELETE behaviour — RESTRICT on `tickets.created_by`
+ERD said: `created_by` is a required FK from Ticket to Agent (audit trail of who opened the ticket).
+Schema decided: `UUID NOT NULL REFERENCES agents(id) ON DELETE RESTRICT`.
+Reason: The diagram marks the relationship as required but does not say what happens when an agent is deleted. `ON DELETE CASCADE` would destroy ticket history. `ON DELETE SET NULL` conflicts with `NOT NULL`. `RESTRICT` preserves the audit record and forces deactivation instead of hard deletion.
+
+### Decision 3: Default value — `status` defaults to `'open'` in the schema
+ERD said: Ticket `status` has allowed values `open|pending|resolved|closed` and new tickets start in an open state.
+Schema decided: `TEXT NOT NULL CHECK (status IN (...)) DEFAULT 'open'`.
+Reason: The ERD implies the initial state but does not mandate where the default lives. A schema-level `DEFAULT` ensures every INSERT—whether from the app, a script, or `psql`—gets `'open'` without relying on application code.
+
+## Rejected Table Shape
+
+### Shape: Tags stored as `TEXT[]` on the tickets table
+What it was: `ALTER TABLE tickets ADD COLUMN tags TEXT[]` — a PostgreSQL array of tag names directly on each ticket row.
+Why rejected: Tags are a separate entity in the ERD with their own `id`, `org_id`, and `color_hex`. An array column has no referential integrity, cannot enforce org-scoped tag identity, and makes renaming or deduplicating tags across tickets impossible without scanning every row.
+What would break: Filtering tickets by tag with consistent semantics, org-level tag management, and the `TicketTag.added_by` audit trail from the ER diagram.
+
+---
+
 ## Submission
 
 Once all 36 tests pass:
