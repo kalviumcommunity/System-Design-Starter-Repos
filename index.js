@@ -44,9 +44,14 @@ function fakeModel() {
 // Return an object with only the safe fields (no secrets).
 // ============================================================
 function buildContext() {
+  // Boundary: only non-sensitive, task-relevant fields cross into the model.
+  // reporterEmail and internalToken are never referenced here — that's the
+  // boundary between "what the model decides" and "what stays private".
   return {
-    // fill this in: title, currentSeverity, service, timeline...
-    // but NOT reporterEmail or internalToken
+    title: incident.title,
+    currentSeverity: incident.currentSeverity,
+    service: incident.service,
+    timeline
   };
 }
 
@@ -56,7 +61,13 @@ function buildContext() {
 // AND there is a non-empty reason.
 // ============================================================
 function isValid(answer) {
-  return false; // fill this in
+  // Validation gate: never trust the model's shape or values blindly.
+  // Must be a known enum value AND have a non-empty, real reason string.
+  if (!answer || typeof answer !== 'object') return false;
+  const hasKnownSeverity = SEVERITIES.includes(answer.suggestedSeverity);
+  const hasReason =
+    typeof answer.reason === 'string' && answer.reason.trim().length > 0;
+  return hasKnownSeverity && hasReason;
 }
 
 // ============================================================
@@ -64,7 +75,15 @@ function isValid(answer) {
 // Return a short message so the workflow still makes sense.
 // ============================================================
 function fallback() {
-  return { status: 'MANUAL_REVIEW', message: '' /* fill this in */ };
+  // Failure path: the workflow keeps moving, but no unverified value is
+  // ever applied — a person has to look at it.
+  return {
+    status: 'MANUAL_REVIEW',
+    message:
+      'AI suggestion unavailable or invalid. Severity unchanged (' +
+      incident.currentSeverity +
+      '). Please review this incident manually.'
+  };
 }
 
 // ── Given to you: runs one request start to finish. ──
