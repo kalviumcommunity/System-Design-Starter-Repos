@@ -250,3 +250,40 @@ incident-retrieval-repair/
 ├── README.md                      ← this file — update with your decisions
 └── package.json                   ← npm scripts — do not edit
 ```
+
+
+## Retrieval-Model Decisions
+
+### Decision 1: Embedding storage decision
+
+Spec said: Each incident's text is split into chunks, and each chunk is embedded into a 1,536-dimension vector.
+
+Schema decided: Store each chunk embedding in `incident_chunks.embedding` as `vector(1536) NOT NULL`.
+
+Reason: pgvector provides the vector type required for similarity search and allows the required HNSW index with cosine similarity operations.
+
+### Decision 2: ON DELETE decision
+
+Spec said: `incident_chunks.incident_id` must reference `incidents(id)` with `ON DELETE CASCADE`.
+
+Schema decided: `incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE`.
+
+Reason: Incident chunks are derived data and have no meaning without their authoritative incident. When an incident is deleted, its chunks should also be deleted so that orphaned retrieval data is not left behind.
+
+### Decision 3: Filter-metadata / denormalisation decision
+
+Spec said: `incident_chunks` must contain denormalised `team_id BIGINT NOT NULL` and `severity TEXT NOT NULL` filter metadata.
+
+Schema decided: Store `team_id` and `severity` directly on every incident chunk.
+
+Reason: Retrieval uses vector similarity together with relational filters. Keeping the filter metadata on the chunk allows retrieval queries to filter directly without requiring a join to `incidents`.
+
+## Rejected Shape
+
+### Shape: Single embedding column on incidents
+
+What it was: An `embedding TEXT` column was added directly to the `incidents` table.
+
+Why rejected: A long incident description needs to be split into multiple chunks, with each chunk having its own embedding.
+
+What would break: A single incident-level embedding loses retrieval granularity. Relevant information inside a long, multi-paragraph description cannot be represented and retrieved as precisely as individual chunks. Embeddings therefore belong in `incident_chunks`, not directly in `incidents`.
