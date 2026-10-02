@@ -31,6 +31,12 @@ Change the `MODE` constant near the top to test each path:
 - `MODE = 'valid'` suggests `HIGH`, then approval changes severity `MEDIUM → HIGH`.
 - `MODE = 'badEnum'` and `MODE = 'failed'` both end in `MANUAL_REVIEW` and leave the real severity unchanged.
 
+## Implementation Details
+1. **`buildContext()`**: Exposes only non-sensitive incident fields (`id`, `title`, `currentSeverity`, `service`, `timeline`), excluding secrets (`reporterEmail`, `internalToken`).
+2. **`isValid(answer)`**: Strictly checks that `answer` is an object, `suggestedSeverity` is in `SEVERITIES` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`), and `reason` is a non-empty string.
+3. **`fallback()`**: Returns a structured manual review state (`status: 'MANUAL_REVIEW'`) with a descriptive message if the model fails or produces invalid output.
+4. **Data Isolation**: The AI suggestion is isolated and never alters `incident.currentSeverity` directly; the real record is only updated through the explicit human approval step.
+
 ## Submit
 Open a **PR** with your completed `index.js`. That's it. Add a short comment if any choice isn't obvious from the code.
 
