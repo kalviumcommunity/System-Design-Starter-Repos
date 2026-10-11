@@ -37,3 +37,9 @@ npm test               # run the tests (they will fail until you fix index.js an
 ```
 
 Read `requirements-request.md` before touching any code — that message is the source of truth for which routes belong and which don't.
+
+---
+
+## Approach and Scope Signals
+
+Core scope was identified by definitive operational commitments necessary for real-time dispatch and driver management (telematics map tracking, driver ratings, incident logs, CEO approvals, and geofence breach alerts). Scope creep was signaled by speculative language ("maybe", "I think", "would be nice") introducing unvetted subsystems (chat, offline sync, fuel analytics, dark mode) outside the bounded 6-week MVP.
