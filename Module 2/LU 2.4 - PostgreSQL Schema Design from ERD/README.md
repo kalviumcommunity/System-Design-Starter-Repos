@@ -60,8 +60,19 @@ entity plus a `ticket_tags` join table (`ticket_id`, `tag_id`, `added_by`,
 `added_at`) that resolves the M:N and carries its own attributes.
 
 ## Running the tests
+The graded suite is the starter repo's **original** `tests/schema.test.sql` (36
+assertions), used unchanged:
 ```bash
 npm install
 npm run db:reset   # drops & recreates helpdesk_test, runs the migration
-npm test           # runs the pgTAP schema tests — all must pass
+npm test           # runs the ORIGINAL tests/schema.test.sql — all must pass
 ```
+
+`tests/extra_checks.sql` is a **supplementary** file (not a replacement). It
+validates each constraint directly — the role CHECK in isolation (a real-org
+insert, so it's the CHECK not an FK, plus a positive control) and all ten
+ON DELETE actions:
+```bash
+pg_prove -d helpdesk_test tests/schema.test.sql tests/extra_checks.sql
+```
+See `tests/RESTORE_ORIGINAL_TESTS.md` if you need to restore the original suite.
