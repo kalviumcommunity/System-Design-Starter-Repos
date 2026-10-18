@@ -1,10 +1,10 @@
 {
   "name": "incident-retrieval-repair",
   "version": "1.0.0",
-  "description": "LU 2.11 Assignment: Fix the broken incident retrieval (pgvector) schema to match the retrieval spec",
+  "description": "Incident retrieval schema repair — pgvector retrieval store that implements the spec, verified with pgTAP.",
   "scripts": {
-    "db:reset": "psql -c 'DROP DATABASE IF EXISTS incident_retrieval_test;' && psql -c 'CREATE DATABASE incident_retrieval_test;' && psql -d incident_retrieval_test -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pgtap;' && psql -d incident_retrieval_test -f migrations/001_retrieval_schema.sql",
+    "db:reset": "psql -c \"DROP DATABASE IF EXISTS incident_retrieval_test\" && psql -c \"CREATE DATABASE incident_retrieval_test\" && psql -d incident_retrieval_test -v ON_ERROR_STOP=1 -f migrations/001_retrieval_schema.sql && psql -d incident_retrieval_test -c \"CREATE EXTENSION IF NOT EXISTS pgtap\"",
     "test": "pg_prove -d incident_retrieval_test tests/schema.test.sql"
   },
-  "devDependencies": {}
+  "license": "MIT"
 }
