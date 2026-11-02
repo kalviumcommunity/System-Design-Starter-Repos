@@ -44,9 +44,14 @@ function fakeModel() {
 // Return an object with only the safe fields (no secrets).
 // ============================================================
 function buildContext() {
+  // Only expose the fields the model needs.
+  // reporterEmail and internalToken are deliberately omitted.
   return {
-    // fill this in: title, currentSeverity, service, timeline...
-    // but NOT reporterEmail or internalToken
+    id:              incident.id,
+    title:           incident.title,
+    currentSeverity: incident.currentSeverity,
+    service:         incident.service,
+    timeline:        timeline,
   };
 }
 
@@ -56,7 +61,11 @@ function buildContext() {
 // AND there is a non-empty reason.
 // ============================================================
 function isValid(answer) {
-  return false; // fill this in
+  // The suggested severity must be one of the known enum values
+  // and there must be a non-empty reason string.
+  const knownSeverity = SEVERITIES.includes(answer.suggestedSeverity);
+  const hasReason     = typeof answer.reason === 'string' && answer.reason.trim().length > 0;
+  return knownSeverity && hasReason;
 }
 
 // ============================================================
@@ -64,7 +73,12 @@ function isValid(answer) {
 // Return a short message so the workflow still makes sense.
 // ============================================================
 function fallback() {
-  return { status: 'MANUAL_REVIEW', message: '' /* fill this in */ };
+  // The model either failed or returned an invalid answer.
+  // Keep the existing severity unchanged and ask a human to decide.
+  return {
+    status:          'MANUAL_REVIEW',
+    message:         `AI suggestion unavailable. Current severity (${incident.currentSeverity}) unchanged — please review manually.`,
+  };
 }
 
 // ── Given to you: runs one request start to finish. ──
