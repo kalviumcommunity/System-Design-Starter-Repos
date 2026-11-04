@@ -1,56 +1,69 @@
--- Helpdesk Schema — INITIAL (BROKEN VERSION)
--- Students: this file has intentional problems. Fix them.
--- Reference: the ER diagram in the assignment-question.md
+-- Helpdesk Schema
+-- Implements the Helpdesk ER diagram. Tables are in dependency order, because a
+-- table can only reference tables that already exist.
 
 -- Setup: enable UUID generation
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Organizations
 CREATE TABLE organizations (
-  id         SERIAL PRIMARY KEY,              -- TODO: should use UUID
-  name       VARCHAR(100),                    -- TODO: missing NOT NULL
-  plan       TEXT,                            -- TODO: no CHECK for allowed values
-  created_at TIMESTAMP                        -- TODO: wrong type, missing DEFAULT
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name       TEXT        NOT NULL,
+  plan       TEXT        NOT NULL CHECK (plan IN ('starter', 'pro', 'enterprise')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Agents
 CREATE TABLE agents (
-  id             SERIAL PRIMARY KEY,           -- TODO: should use UUID
-  name           VARCHAR(100),                 -- TODO: missing NOT NULL
-  email          TEXT,                         -- TODO: missing NOT NULL and UNIQUE
-  role           TEXT,                         -- TODO: no CHECK for allowed values
-  org_id         INTEGER REFERENCES organizations(id),  -- TODO: wrong type, missing NOT NULL, missing ON DELETE
-  created_at     TIMESTAMP,                   -- TODO: wrong type, missing DEFAULT
-  deactivated_at TIMESTAMP                    -- TODO: nullable is correct but wrong type, should be TIMESTAMPTZ
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  name           TEXT        NOT NULL,
+  email          TEXT        NOT NULL UNIQUE,
+  role           TEXT        NOT NULL CHECK (role IN ('agent', 'supervisor', 'admin')),
+  org_id         UUID        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deactivated_at TIMESTAMPTZ -- NULL means active
 );
 
 -- Tickets
 CREATE TABLE tickets (
-  id           SERIAL PRIMARY KEY,             -- TODO: should use UUID
-  subject      VARCHAR(200),                   -- TODO: missing NOT NULL
-  body         TEXT,                           -- nullable is correct
-  priority     TEXT,                           -- TODO: no CHECK for low|medium|high|urgent
-  status       TEXT DEFAULT 'open',            -- TODO: missing NOT NULL, missing CHECK
-  org_id       INTEGER REFERENCES organizations(id),  -- TODO: wrong type, missing NOT NULL, missing ON DELETE
-  created_by   INTEGER REFERENCES agents(id),  -- TODO: wrong type, missing NOT NULL, missing ON DELETE
-  assignee_id  INTEGER REFERENCES agents(id),  -- TODO: wrong type, missing ON DELETE (SET NULL)
-  created_at   TIMESTAMP DEFAULT NOW(),        -- TODO: should be TIMESTAMPTZ
-  resolved_at  TIMESTAMP                       -- TODO: nullable is correct but wrong type, should be TIMESTAMPTZ
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject     TEXT        NOT NULL,
+  body        TEXT        NOT NULL,
+  priority    TEXT        NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+  status      TEXT        NOT NULL CHECK (status IN ('open', 'pending', 'resolved', 'closed'))
+                          DEFAULT 'open',
+  org_id      UUID        NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
+  created_by  UUID        NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+  assignee_id UUID        REFERENCES agents(id) ON DELETE SET NULL, -- NULL means unassigned
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at TIMESTAMPTZ -- stays NULL until the ticket is resolved
 );
 
 -- Comments
 CREATE TABLE comments (
-  id         SERIAL PRIMARY KEY,              -- TODO: should use UUID
-  ticket_id  INTEGER REFERENCES tickets(id),  -- TODO: wrong type, missing NOT NULL, missing ON DELETE
-  author_id  INTEGER REFERENCES agents(id),   -- TODO: wrong type, missing NOT NULL, missing ON DELETE
-  body       TEXT,                            -- TODO: missing NOT NULL
-  internal   TEXT DEFAULT 'false',            -- TODO: wrong type, should be BOOLEAN
-  created_at TIMESTAMP DEFAULT NOW()          -- TODO: should be TIMESTAMPTZ
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id  UUID        NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author_id  UUID        NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+  body       TEXT        NOT NULL,
+  internal   BOOLEAN     NOT NULL DEFAULT FALSE, -- TRUE means visible to agents only
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Rejected shape: tags stored as array on tickets
--- TODO: Remove this and create Tag + TicketTag tables instead
-ALTER TABLE tickets ADD COLUMN tags TEXT[];
+-- Tags
+CREATE TABLE tags (
+  id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id    UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name      TEXT NOT NULL,
+  color_hex TEXT NOT NULL,
+  UNIQUE (org_id, name) -- one tag of each name per organization
+);
 
--- NOTE: Tag and TicketTag tables are MISSING entirely.
--- Students must add them based on the ER diagram.
+-- Ticket tags: resolves the many-to-many between tickets and tags
+CREATE TABLE ticket_tags (
+  id        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  ticket_id UUID        NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  tag_id    UUID        NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  added_by  UUID        NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+  added_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (ticket_id, tag_id) -- a tag can be on a ticket only once
+);
