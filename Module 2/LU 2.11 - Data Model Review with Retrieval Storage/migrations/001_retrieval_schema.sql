@@ -1,13 +1,9 @@
--- migrations/001_retrieval_schema.sql (CURRENT — BROKEN)
---
 -- Incident retrieval storage for the "similar past incidents" AI feature.
--- This draft has intentional errors. Fix it to match the retrieval spec in
--- the assignment question. When you are done, all 20 pgTAP tests must pass.
 
--- MISSING: CREATE EXTENSION IF NOT EXISTS vector;
---          The vector(n) type and the HNSW index come from the pgvector
---          extension. Without it, vector(1536) does not exist.
+-- The vector(n) type and the HNSW index come from the pgvector extension.
+CREATE EXTENSION IF NOT EXISTS vector;
 
+-- Authoritative records. Chunks are derived from these.
 CREATE TABLE incidents (
   id          BIGSERIAL PRIMARY KEY,
   title       TEXT NOT NULL,
@@ -18,26 +14,21 @@ CREATE TABLE incidents (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- One incident has many chunks, and each chunk has its own vector.
 CREATE TABLE incident_chunks (
-  id          SERIAL PRIMARY KEY,                 -- wrong: should be BIGSERIAL
-  incident_id INTEGER REFERENCES incidents(id),   -- wrong: wrong type, missing NOT NULL, missing ON DELETE
-  chunk_text  TEXT,                               -- wrong: missing NOT NULL
-  embedding   TEXT,                               -- wrong: should be vector(1536) NOT NULL, not TEXT
-  -- MISSING: team_id   BIGINT NOT NULL   (denormalised filter metadata)
-  -- MISSING: severity  TEXT   NOT NULL   (denormalised filter metadata)
-  created_at  TIMESTAMP DEFAULT now()             -- wrong: should be TIMESTAMPTZ NOT NULL
+  id          BIGSERIAL PRIMARY KEY,
+  incident_id BIGINT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  chunk_text  TEXT NOT NULL,          -- the source text that was embedded
+  embedding   vector(1536) NOT NULL,
+  team_id     BIGINT NOT NULL,        -- copied filter column
+  severity    TEXT NOT NULL,          -- copied filter column
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- BUG: single embedding bolted onto incidents — rejected shape.
--- An incident's long, multi-paragraph description must be split into several
--- chunks, each with its own vector. One embedding per incident is the wrong
--- model. Remove this line; embeddings live per-chunk in incident_chunks.
-ALTER TABLE incidents ADD COLUMN embedding TEXT;  -- wrong: remove entirely
+-- Serves the "similar incidents" search that runs on every incident open.
+CREATE INDEX idx_incident_chunks_embedding
+  ON incident_chunks USING hnsw (embedding vector_cosine_ops);
 
--- MISSING: ANN index on incident_chunks.embedding
---          CREATE INDEX idx_incident_chunks_embedding
---            ON incident_chunks USING hnsw (embedding vector_cosine_ops);
-
--- MISSING: B-tree index on incident_chunks.incident_id
---          CREATE INDEX idx_incident_chunks_incident_id
---            ON incident_chunks (incident_id);
+-- Serves re-embedding and cascade deletes, which find all chunks of one incident.
+CREATE INDEX idx_incident_chunks_incident_id
+  ON incident_chunks (incident_id);
